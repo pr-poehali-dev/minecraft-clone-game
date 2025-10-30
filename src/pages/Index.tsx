@@ -108,6 +108,18 @@ const Index = () => {
     if (gameMode !== 'menu') {
       const handleKeyDown = (e: KeyboardEvent) => {
         keysPressed.current.add(e.key.toLowerCase());
+        
+        if (e.key.toLowerCase() === 'e') {
+          setShowInventory(prev => !prev);
+        }
+        
+        if (e.key >= '1' && e.key <= '4') {
+          const blockIndex = parseInt(e.key) - 1;
+          if (inventory[blockIndex]) {
+            setSelectedBlock(inventory[blockIndex].type);
+            toast.success(`Выбран: ${blockLabels[inventory[blockIndex].type]}`);
+          }
+        }
       };
 
       const handleKeyUp = (e: KeyboardEvent) => {
@@ -133,7 +145,7 @@ const Index = () => {
           setCamera(prev => ({
             ...prev,
             yaw: prev.yaw + deltaX * 0.003,
-            pitch: Math.max(-Math.PI / 2, Math.min(Math.PI / 2, prev.pitch - deltaY * 0.003))
+            pitch: Math.max(-Math.PI / 2, Math.min(Math.PI / 2, prev.pitch + deltaY * 0.003))
           }));
 
           lastMousePos.current = { x: e.clientX, y: e.clientY };
@@ -399,19 +411,51 @@ const Index = () => {
       const item = inventory.find(i => i.type === selectedBlock);
       if (item && item.count > 0) {
         const forward = {
-          x: Math.sin(camera.yaw),
-          z: Math.cos(camera.yaw)
+          x: Math.sin(camera.yaw) * Math.cos(camera.pitch),
+          y: -Math.sin(camera.pitch),
+          z: Math.cos(camera.yaw) * Math.cos(camera.pitch)
         };
         
-        const placeX = Math.round(camera.x + forward.x * 2);
-        const placeY = Math.round(camera.y);
-        const placeZ = Math.round(camera.z + forward.z * 2);
+        const distance = 3;
+        const placeX = Math.round(camera.x + forward.x * distance);
+        const placeY = Math.round(camera.y + forward.y * distance);
+        const placeZ = Math.round(camera.z + forward.z * distance);
 
-        setWorld([...world, { type: selectedBlock, x: placeX, y: placeY, z: placeZ }]);
-        setInventory(inventory.map(i => 
-          i.type === selectedBlock ? { ...i, count: i.count - 1 } : i
-        ));
-        toast.success(`Размещен блок: ${blockLabels[selectedBlock]}`);
+        const exists = world.some(b => b.x === placeX && b.y === placeY && b.z === placeZ);
+        if (!exists) {
+          setWorld([...world, { type: selectedBlock, x: placeX, y: placeY, z: placeZ }]);
+          setInventory(inventory.map(i => 
+            i.type === selectedBlock ? { ...i, count: i.count - 1 } : i
+          ));
+          toast.success(`Размещен блок: ${blockLabels[selectedBlock]}`);
+        }
+      } else {
+        toast.error('Недостаточно блоков!');
+      }
+    } else if (e.button === 2) {
+      const forward = {
+        x: Math.sin(camera.yaw) * Math.cos(camera.pitch),
+        y: -Math.sin(camera.pitch),
+        z: Math.cos(camera.yaw) * Math.cos(camera.pitch)
+      };
+      
+      for (let dist = 1; dist <= 5; dist += 0.5) {
+        const targetX = Math.round(camera.x + forward.x * dist);
+        const targetY = Math.round(camera.y + forward.y * dist);
+        const targetZ = Math.round(camera.z + forward.z * dist);
+        
+        const blockIndex = world.findIndex(b => b.x === targetX && b.y === targetY && b.z === targetZ);
+        if (blockIndex !== -1) {
+          const removedBlock = world[blockIndex];
+          setWorld(world.filter((_, i) => i !== blockIndex));
+          setInventory(inventory.map(i => 
+            i.type === removedBlock.type ? { ...i, count: i.count + 1 } : i
+          ));
+          toast.success(`Удален блок: ${blockLabels[removedBlock.type]}`);
+          setIsSwinging(true);
+          setHandAnimation(0);
+          break;
+        }
       }
     }
   };
@@ -477,9 +521,19 @@ const Index = () => {
               PvP Режим
             </Button>
           </div>
-          <p className="text-center mt-8 text-sm opacity-75">
-            WASD - Движение | Пробел/Shift - Вверх/Вниз | Мышь - Обзор
-          </p>
+          <div className="mt-8 space-y-2 text-sm opacity-75">
+            <p className="text-center font-bold">Управление:</p>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div>• WASD - Движение</div>
+              <div>• Мышь - Обзор (зажать ЛКМ)</div>
+              <div>• Пробел - Вверх</div>
+              <div>• Shift - Вниз</div>
+              <div>• ЛКМ - Поставить блок</div>
+              <div>• ПКМ - Убрать блок</div>
+              <div>• E - Инвентарь</div>
+              <div>• 1-4 - Быстрый выбор блока</div>
+            </div>
+          </div>
         </Card>
       </div>
     );
@@ -535,30 +589,44 @@ const Index = () => {
         <div className="w-1 h-8 bg-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"></div>
       </div>
 
-      {showInventory && (
-        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-10 bg-card/95 p-4 border-4 border-black shadow-pixel">
-          <h3 className="text-sm mb-4 text-center">ИНВЕНТАРЬ</h3>
-          <div className="flex gap-2">
-            {inventory.map((item, index) => (
-              <button
-                key={index}
-                onClick={() => setSelectedBlock(item.type)}
-                className={`w-16 h-16 border-4 border-black flex flex-col items-center justify-center transition-transform hover:scale-110 ${
-                  selectedBlock === item.type ? 'ring-4 ring-primary' : ''
-                }`}
-                style={{ backgroundColor: blockColors[item.type] }}
-              >
-                <span className="text-xs text-white drop-shadow-[0_2px_2px_rgba(0,0,0,1)]">
-                  {item.count}
-                </span>
-              </button>
-            ))}
+      <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-10 bg-card/95 p-2 border-4 border-black shadow-pixel">
+        <div className="flex gap-2">
+          {inventory.map((item, index) => (
+            <button
+              key={index}
+              onClick={() => {
+                setSelectedBlock(item.type);
+                toast.success(`Выбран: ${blockLabels[item.type]}`);
+              }}
+              className={`w-14 h-14 border-4 border-black flex flex-col items-center justify-center transition-all hover:scale-110 relative ${
+                selectedBlock === item.type ? 'ring-4 ring-white scale-110' : ''
+              }`}
+              style={{ backgroundColor: blockColors[item.type] }}
+              title={blockLabels[item.type]}
+            >
+              <span className="text-[10px] font-bold absolute top-0 left-1 text-white drop-shadow-[0_2px_2px_rgba(0,0,0,1)]">
+                {index + 1}
+              </span>
+              <span className="text-xs font-bold text-white drop-shadow-[0_2px_2px_rgba(0,0,0,1)]">
+                {item.count}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="absolute bottom-4 right-4 flex flex-col gap-2">
+        <div className="text-xs bg-card/90 p-3 border-2 border-black shadow-pixel">
+          <div className="font-bold mb-1">Режим: {getModeLabel(gameMode)}</div>
+          <div className="text-[10px] opacity-75">
+            Текущий блок: {blockLabels[selectedBlock]}
           </div>
         </div>
-      )}
-
-      <div className="absolute bottom-4 right-4 text-xs bg-card/80 p-2 border-2 border-black">
-        Режим: {getModeLabel(gameMode)}
+        <div className="text-[10px] bg-card/80 p-2 border-2 border-black">
+          <div>💡 ЛКМ + тяни = поворот</div>
+          <div>💡 E = инвентарь</div>
+          <div>💡 1-4 = блоки</div>
+        </div>
       </div>
     </div>
   );
