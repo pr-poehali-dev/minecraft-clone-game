@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
+import { Input } from '@/components/ui/input';
 import Icon from '@/components/ui/icon';
 import { toast } from 'sonner';
 
@@ -29,6 +30,22 @@ interface Camera {
   yaw: number;
 }
 
+interface Bot {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  z: number;
+  color: string;
+}
+
+interface ChatMessage {
+  id: string;
+  author: string;
+  text: string;
+  timestamp: number;
+}
+
 const BLOCK_SIZE = 50;
 const WORLD_SIZE = 30;
 const RENDER_DISTANCE = 15;
@@ -52,6 +69,19 @@ const blockLabels: Record<BlockType, string> = {
   cobblestone: 'Булыжник',
   air: 'Воздух'
 };
+
+const BOT_MESSAGES = [
+  'Привет! Как дела?',
+  'Крутая постройка!',
+  'Кто-нибудь хочет поиграть?',
+  'Я нашел алмазы!',
+  'Давайте построим замок',
+  'Кто со мной на PvP?',
+  'Смотрите что я построил!',
+  'Нужна помощь с фермой',
+  'Вау, это круто!',
+  'Пойдем в шахту?'
+];
 
 const Index = () => {
   const [gameMode, setGameMode] = useState<GameMode>('menu');
@@ -77,18 +107,38 @@ const Index = () => {
   const [handAnimation, setHandAnimation] = useState(0);
   const [isSwinging, setIsSwinging] = useState(false);
   const [pointerLocked, setPointerLocked] = useState(false);
+  const [bots, setBots] = useState<Bot[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [showChat, setShowChat] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keysPressed = useRef<Set<string>>(new Set());
+  const chatInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (gameMode !== 'menu' && gameMode !== 'servers') {
       if (selectedServer === 'funtime') {
         generateVillage();
+        initializeBots();
       } else {
         generateFlatWorld();
       }
     }
   }, [gameMode, selectedServer]);
+
+  useEffect(() => {
+    if (bots.length > 0) {
+      const botChatInterval = setInterval(() => {
+        if (Math.random() > 0.7) {
+          const randomBot = bots[Math.floor(Math.random() * bots.length)];
+          const randomMessage = BOT_MESSAGES[Math.floor(Math.random() * BOT_MESSAGES.length)];
+          addChatMessage(randomBot.name, randomMessage);
+        }
+      }, 8000);
+
+      return () => clearInterval(botChatInterval);
+    }
+  }, [bots]);
 
   useEffect(() => {
     if (gameMode === 'survival' || gameMode === 'hardcore' || gameMode === 'adventure') {
@@ -116,6 +166,28 @@ const Index = () => {
   useEffect(() => {
     if (gameMode !== 'menu' && gameMode !== 'servers') {
       const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key.toLowerCase() === 't' && !showChat) {
+          e.preventDefault();
+          setShowChat(true);
+          exitPointerLock();
+          setTimeout(() => chatInputRef.current?.focus(), 100);
+          return;
+        }
+
+        if (showChat && e.key === 'Enter') {
+          e.preventDefault();
+          sendChatMessage();
+          return;
+        }
+
+        if (showChat && e.key === 'Escape') {
+          setShowChat(false);
+          setChatInput('');
+          return;
+        }
+
+        if (showChat) return;
+
         keysPressed.current.add(e.key.toLowerCase());
         
         if (e.key.toLowerCase() === 'e') {
@@ -160,30 +232,32 @@ const Index = () => {
       window.addEventListener('mousemove', handleMouseMove);
 
       const moveInterval = setInterval(() => {
+        if (showChat) return;
+
         setCamera(prev => {
           let newX = prev.x;
           let newZ = prev.z;
           let newY = prev.y;
 
-          const speed = 0.15;
-          const forward = { x: -Math.sin(prev.yaw), z: -Math.cos(prev.yaw) };
-          const right = { x: Math.cos(prev.yaw), z: -Math.sin(prev.yaw) };
+          const speed = 0.2;
+          const cosYaw = Math.cos(prev.yaw);
+          const sinYaw = Math.sin(prev.yaw);
 
           if (keysPressed.current.has('w')) {
-            newX += forward.x * speed;
-            newZ += forward.z * speed;
+            newX -= sinYaw * speed;
+            newZ -= cosYaw * speed;
           }
           if (keysPressed.current.has('s')) {
-            newX -= forward.x * speed;
-            newZ -= forward.z * speed;
+            newX += sinYaw * speed;
+            newZ += cosYaw * speed;
           }
           if (keysPressed.current.has('a')) {
-            newX -= right.x * speed;
-            newZ -= right.z * speed;
+            newX -= cosYaw * speed;
+            newZ += sinYaw * speed;
           }
           if (keysPressed.current.has('d')) {
-            newX += right.x * speed;
-            newZ += right.z * speed;
+            newX += cosYaw * speed;
+            newZ -= sinYaw * speed;
           }
           if (keysPressed.current.has(' ')) {
             newY += speed;
@@ -208,7 +282,7 @@ const Index = () => {
         clearInterval(moveInterval);
       };
     }
-  }, [gameMode, pointerLocked, inventory]);
+  }, [gameMode, pointerLocked, inventory, showChat]);
 
   useEffect(() => {
     if (isSwinging) {
@@ -229,7 +303,55 @@ const Index = () => {
   useEffect(() => {
     const animationFrame = requestAnimationFrame(() => drawWorld());
     return () => cancelAnimationFrame(animationFrame);
-  }, [world, camera, handAnimation]);
+  }, [world, camera, handAnimation, bots]);
+
+  const initializeBots = () => {
+    const botList: Bot[] = [
+      { id: '1', name: 'Steve123', x: 10, y: 2, z: 10, color: '#3B82F6' },
+      { id: '2', name: 'Alex_Pro', x: 12, y: 2, z: 8, color: '#EF4444' },
+      { id: '3', name: 'Creeper99', x: 18, y: 2, z: 15, color: '#10B981' },
+      { id: '4', name: 'Diamond_Miner', x: 8, y: 2, z: 12, color: '#8B5CF6' }
+    ];
+    setBots(botList);
+    
+    addChatMessage('Сервер', 'Добро пожаловать на FunTime!');
+    setTimeout(() => {
+      addChatMessage('Steve123', 'Привет всем! 👋');
+    }, 1000);
+  };
+
+  const addChatMessage = (author: string, text: string) => {
+    const message: ChatMessage = {
+      id: Date.now().toString() + Math.random(),
+      author,
+      text,
+      timestamp: Date.now()
+    };
+    setChatMessages(prev => [...prev.slice(-20), message]);
+  };
+
+  const sendChatMessage = () => {
+    if (chatInput.trim()) {
+      addChatMessage('Вы', chatInput);
+      setChatInput('');
+      setShowChat(false);
+      
+      setTimeout(() => {
+        if (Math.random() > 0.5 && bots.length > 0) {
+          const randomBot = bots[Math.floor(Math.random() * bots.length)];
+          const responses = [
+            'Согласен!',
+            'Круто!',
+            'Да, точно',
+            'Интересно',
+            'Хорошая идея!',
+            '👍'
+          ];
+          addChatMessage(randomBot.name, responses[Math.floor(Math.random() * responses.length)]);
+        }
+      }, 1500);
+    }
+  };
 
   const requestPointerLock = () => {
     canvasRef.current?.requestPointerLock();
@@ -296,7 +418,7 @@ const Index = () => {
     }
 
     setWorld(blocks);
-    setCamera({ x: 15, y: 5, z: 22, pitch: 0, yaw: 0 });
+    setCamera({ x: 15, y: 5, z: 20, pitch: 0, yaw: 0 });
   };
 
   const project3DTo2D = (x: number, y: number, z: number) => {
@@ -376,6 +498,61 @@ const Index = () => {
     });
   };
 
+  const drawBot = (ctx: CanvasRenderingContext2D, bot: Bot) => {
+    const bodyHeight = 2;
+    const bodyWidth = 0.6;
+    
+    const corners = [
+      [bot.x - bodyWidth/2, bot.y, bot.z - bodyWidth/2],
+      [bot.x + bodyWidth/2, bot.y, bot.z - bodyWidth/2],
+      [bot.x + bodyWidth/2, bot.y + bodyHeight, bot.z - bodyWidth/2],
+      [bot.x - bodyWidth/2, bot.y + bodyHeight, bot.z - bodyWidth/2],
+      [bot.x - bodyWidth/2, bot.y, bot.z + bodyWidth/2],
+      [bot.x + bodyWidth/2, bot.y, bot.z + bodyWidth/2],
+      [bot.x + bodyWidth/2, bot.y + bodyHeight, bot.z + bodyWidth/2],
+      [bot.x - bodyWidth/2, bot.y + bodyHeight, bot.z + bodyWidth/2]
+    ];
+
+    const projected = corners.map(([cx, cy, cz]) => project3DTo2D(cx, cy, cz));
+    
+    if (projected.some(p => p.distance < 0)) return;
+
+    const faces = [
+      [0, 1, 2, 3],
+      [4, 5, 6, 7],
+      [0, 1, 5, 4],
+      [2, 3, 7, 6],
+      [0, 3, 7, 4],
+      [1, 2, 6, 5]
+    ];
+
+    faces.forEach(() => {
+      ctx.fillStyle = bot.color;
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+
+      ctx.beginPath();
+      ctx.moveTo(projected[0].x, projected[0].y);
+      for (let i = 1; i < 4; i++) {
+        ctx.lineTo(projected[i].x, projected[i].y);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    });
+
+    const namePos = project3DTo2D(bot.x, bot.y + bodyHeight + 0.5, bot.z);
+    if (namePos.distance > 0) {
+      ctx.fillStyle = '#FFFFFF';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 3;
+      ctx.font = '12px "Press Start 2P"';
+      ctx.textAlign = 'center';
+      ctx.strokeText(bot.name, namePos.x, namePos.y);
+      ctx.fillText(bot.name, namePos.x, namePos.y);
+    }
+  };
+
   const adjustBrightness = (color: string, factor: number) => {
     const hex = color.replace('#', '');
     const r = Math.floor(parseInt(hex.substring(0, 2), 16) * factor);
@@ -439,6 +616,10 @@ const Index = () => {
       if (block.type !== 'air') {
         drawCube(ctx, block.x, block.y, block.z, blockColors[block.type]);
       }
+    });
+
+    bots.forEach(bot => {
+      drawBot(ctx, bot);
     });
 
     drawHand(ctx);
@@ -584,13 +765,13 @@ const Index = () => {
             <p className="text-center font-bold">Управление:</p>
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div>• WASD - Движение</div>
-              <div>• Мышь - Обзор (клик для захвата)</div>
+              <div>• Мышь - Обзор</div>
               <div>• Пробел - Вверх</div>
               <div>• Shift - Вниз</div>
-              <div>• ЛКМ - Поставить блок</div>
-              <div>• ПКМ - Убрать блок</div>
-              <div>• E - Инвентарь</div>
-              <div>• ESC - Выйти из игры</div>
+              <div>• ЛКМ - Поставить</div>
+              <div>• ПКМ - Убрать</div>
+              <div>• T - Чат</div>
+              <div>• ESC - Меню</div>
             </div>
           </div>
         </Card>
@@ -672,12 +853,12 @@ const Index = () => {
   }
 
   return (
-    <div className="min-h-screen bg-sky-400 relative overflow-hidden">
+    <div className="fixed inset-0 bg-sky-400 overflow-hidden">
       {!pointerLocked && (
         <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
           <Card className="p-8 border-4 border-black shadow-pixel text-center">
             <h2 className="text-2xl mb-4">Нажмите для игры</h2>
-            <p className="text-sm mb-4 opacity-75">ESC - выход из режима захвата мыши</p>
+            <p className="text-sm mb-4 opacity-75">T - чат | ESC - выход</p>
             <Button onClick={requestPointerLock} className="border-4 border-black shadow-pixel">
               <Icon name="MousePointer2" className="mr-2" />
               Начать
@@ -714,20 +895,54 @@ const Index = () => {
         </div>
       )}
 
-      <div className="flex items-center justify-center min-h-screen">
-        <canvas
-          ref={canvasRef}
-          width={1200}
-          height={800}
-          onClick={handleCanvasClick}
-          onContextMenu={handleContextMenu}
-          className="border-8 border-black shadow-pixel cursor-crosshair"
-        />
-      </div>
+      <canvas
+        ref={canvasRef}
+        width={window.innerWidth}
+        height={window.innerHeight}
+        onClick={handleCanvasClick}
+        onContextMenu={handleContextMenu}
+        className="w-full h-full cursor-crosshair"
+      />
 
       <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none">
         <div className="w-6 h-0.5 bg-white shadow-lg"></div>
         <div className="w-0.5 h-6 bg-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 shadow-lg"></div>
+      </div>
+
+      <div className="absolute bottom-20 left-4 z-10 w-96 max-h-48 overflow-hidden">
+        <div className="space-y-1">
+          {chatMessages.slice(-5).map(msg => (
+            <div key={msg.id} className="bg-black/50 px-3 py-1 text-xs text-white rounded backdrop-blur-sm">
+              <span className="font-bold text-primary">{msg.author}:</span> {msg.text}
+            </div>
+          ))}
+        </div>
+        
+        {showChat && (
+          <div className="mt-2 flex gap-2">
+            <Input
+              ref={chatInputRef}
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              placeholder="Введите сообщение..."
+              className="bg-black/70 border-2 border-white text-white text-xs"
+              maxLength={100}
+            />
+            <Button 
+              onClick={sendChatMessage}
+              size="sm"
+              className="bg-primary border-2 border-black"
+            >
+              <Icon name="Send" size={14} />
+            </Button>
+          </div>
+        )}
+        
+        {!showChat && (
+          <div className="mt-2 text-[10px] text-white/60">
+            Нажми T для чата
+          </div>
+        )}
       </div>
 
       <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-10 bg-card/95 p-2 border-4 border-black shadow-pixel">
@@ -759,11 +974,13 @@ const Index = () => {
       <div className="absolute bottom-4 right-4 flex flex-col gap-2">
         <div className="text-xs bg-card/90 p-3 border-2 border-black shadow-pixel">
           <div className="font-bold mb-1">
-            {selectedServer ? `Сервер: ${selectedServer.toUpperCase()}` : `Режим: ${getModeLabel(gameMode)}`}
+            {selectedServer ? `${selectedServer.toUpperCase()}` : getModeLabel(gameMode)}
           </div>
-          <div className="text-[10px] opacity-75">
-            Блок: {blockLabels[selectedBlock]}
-          </div>
+          {bots.length > 0 && (
+            <div className="text-[10px] opacity-75">
+              Игроков: {bots.length + 1}
+            </div>
+          )}
         </div>
       </div>
     </div>
