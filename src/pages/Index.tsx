@@ -69,7 +69,7 @@ const Index = () => {
   const [showInventory, setShowInventory] = useState(false);
   const [camera, setCamera] = useState<Camera>({
     x: 15,
-    y: 3,
+    y: 5,
     z: 15,
     pitch: 0,
     yaw: 0
@@ -149,7 +149,7 @@ const Index = () => {
           setCamera(prev => ({
             ...prev,
             yaw: prev.yaw + e.movementX * sensitivity,
-            pitch: Math.max(-Math.PI / 2, Math.min(Math.PI / 2, prev.pitch - e.movementY * sensitivity))
+            pitch: Math.max(-Math.PI / 2, Math.min(Math.PI / 2, prev.pitch + e.movementY * sensitivity))
           }));
         }
       };
@@ -166,7 +166,7 @@ const Index = () => {
           let newY = prev.y;
 
           const speed = 0.15;
-          const forward = { x: Math.sin(prev.yaw), z: Math.cos(prev.yaw) };
+          const forward = { x: -Math.sin(prev.yaw), z: -Math.cos(prev.yaw) };
           const right = { x: Math.cos(prev.yaw), z: -Math.sin(prev.yaw) };
 
           if (keysPressed.current.has('w')) {
@@ -194,7 +194,7 @@ const Index = () => {
 
           newX = Math.max(0, Math.min(WORLD_SIZE - 1, newX));
           newZ = Math.max(0, Math.min(WORLD_SIZE - 1, newZ));
-          newY = Math.max(1, Math.min(20, newY));
+          newY = Math.max(2, Math.min(20, newY));
 
           return { ...prev, x: newX, y: newY, z: newZ };
         });
@@ -296,7 +296,7 @@ const Index = () => {
     }
 
     setWorld(blocks);
-    setCamera({ x: 15, y: 3, z: 22, pitch: 0, yaw: Math.PI });
+    setCamera({ x: 15, y: 5, z: 22, pitch: 0, yaw: 0 });
   };
 
   const project3DTo2D = (x: number, y: number, z: number) => {
@@ -314,14 +314,14 @@ const Index = () => {
 
     const rotatedX = dx * cosYaw - dz * sinYaw;
     const rotatedZ = dx * sinYaw + dz * cosYaw;
-    const rotatedY = dy * cosPitch - rotatedZ * sinPitch;
-    const finalZ = dy * sinPitch + rotatedZ * cosPitch;
+    const rotatedY = dy * cosPitch + rotatedZ * sinPitch;
+    const finalZ = -dy * sinPitch + rotatedZ * cosPitch;
 
     if (finalZ <= 0.1) return { x: 0, y: 0, distance: -1 };
 
     const fov = 500;
     const screenX = (rotatedX * fov) / finalZ + canvas.width / 2;
-    const screenY = (rotatedY * fov) / finalZ + canvas.height / 2;
+    const screenY = (-rotatedY * fov) / finalZ + canvas.height / 2;
 
     return { x: screenX, y: screenY, distance: finalZ };
   };
