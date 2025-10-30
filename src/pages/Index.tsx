@@ -20,15 +20,23 @@ interface InventoryItem {
   count: number;
 }
 
-const BLOCK_SIZE = 32;
-const WORLD_WIDTH = 20;
-const WORLD_HEIGHT = 15;
+interface Camera {
+  x: number;
+  y: number;
+  z: number;
+  pitch: number;
+  yaw: number;
+}
+
+const BLOCK_SIZE = 50;
+const WORLD_SIZE = 16;
+const RENDER_DISTANCE = 10;
 
 const blockColors: Record<BlockType, string> = {
   grass: '#228B22',
   dirt: '#8B4513',
   stone: '#708090',
-  wood: '#8B4513',
+  wood: '#654321',
   air: 'transparent'
 };
 
@@ -53,7 +61,19 @@ const Index = () => {
   const [health, setHealth] = useState(100);
   const [hunger, setHunger] = useState(100);
   const [showInventory, setShowInventory] = useState(false);
+  const [camera, setCamera] = useState<Camera>({
+    x: 8,
+    y: 5,
+    z: 8,
+    pitch: 0,
+    yaw: 0
+  });
+  const [handAnimation, setHandAnimation] = useState(0);
+  const [isSwinging, setIsSwinging] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const keysPressed = useRef<Set<string>>(new Set());
+  const mouseDown = useRef(false);
+  const lastMousePos = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
     if (gameMode !== 'menu') {
@@ -85,31 +105,259 @@ const Index = () => {
   }, [health, gameMode]);
 
   useEffect(() => {
-    drawWorld();
-  }, [world]);
+    if (gameMode !== 'menu') {
+      const handleKeyDown = (e: KeyboardEvent) => {
+        keysPressed.current.add(e.key.toLowerCase());
+      };
+
+      const handleKeyUp = (e: KeyboardEvent) => {
+        keysPressed.current.delete(e.key.toLowerCase());
+      };
+
+      const handleMouseDown = (e: MouseEvent) => {
+        if (e.button === 0) {
+          mouseDown.current = true;
+          lastMousePos.current = { x: e.clientX, y: e.clientY };
+        }
+      };
+
+      const handleMouseUp = () => {
+        mouseDown.current = false;
+      };
+
+      const handleMouseMove = (e: MouseEvent) => {
+        if (mouseDown.current) {
+          const deltaX = e.clientX - lastMousePos.current.x;
+          const deltaY = e.clientY - lastMousePos.current.y;
+
+          setCamera(prev => ({
+            ...prev,
+            yaw: prev.yaw + deltaX * 0.003,
+            pitch: Math.max(-Math.PI / 2, Math.min(Math.PI / 2, prev.pitch - deltaY * 0.003))
+          }));
+
+          lastMousePos.current = { x: e.clientX, y: e.clientY };
+        }
+      };
+
+      window.addEventListener('keydown', handleKeyDown);
+      window.addEventListener('keyup', handleKeyUp);
+      window.addEventListener('mousedown', handleMouseDown);
+      window.addEventListener('mouseup', handleMouseUp);
+      window.addEventListener('mousemove', handleMouseMove);
+
+      const moveInterval = setInterval(() => {
+        setCamera(prev => {
+          let newX = prev.x;
+          let newZ = prev.z;
+          let newY = prev.y;
+
+          const speed = 0.2;
+          const forward = { x: Math.sin(prev.yaw), z: Math.cos(prev.yaw) };
+          const right = { x: Math.cos(prev.yaw), z: -Math.sin(prev.yaw) };
+
+          if (keysPressed.current.has('w')) {
+            newX += forward.x * speed;
+            newZ += forward.z * speed;
+          }
+          if (keysPressed.current.has('s')) {
+            newX -= forward.x * speed;
+            newZ -= forward.z * speed;
+          }
+          if (keysPressed.current.has('a')) {
+            newX -= right.x * speed;
+            newZ -= right.z * speed;
+          }
+          if (keysPressed.current.has('d')) {
+            newX += right.x * speed;
+            newZ += right.z * speed;
+          }
+          if (keysPressed.current.has(' ')) {
+            newY += speed;
+          }
+          if (keysPressed.current.has('shift')) {
+            newY -= speed;
+          }
+
+          newX = Math.max(0, Math.min(WORLD_SIZE - 1, newX));
+          newZ = Math.max(0, Math.min(WORLD_SIZE - 1, newZ));
+          newY = Math.max(1, Math.min(15, newY));
+
+          return { ...prev, x: newX, y: newY, z: newZ };
+        });
+      }, 16);
+
+      return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+        window.removeEventListener('keyup', handleKeyUp);
+        window.removeEventListener('mousedown', handleMouseDown);
+        window.removeEventListener('mouseup', handleMouseUp);
+        window.removeEventListener('mousemove', handleMouseMove);
+        clearInterval(moveInterval);
+      };
+    }
+  }, [gameMode]);
+
+  useEffect(() => {
+    if (isSwinging) {
+      const animate = () => {
+        setHandAnimation(prev => {
+          if (prev >= Math.PI) {
+            setIsSwinging(false);
+            return 0;
+          }
+          return prev + 0.3;
+        });
+      };
+      const interval = setInterval(animate, 16);
+      return () => clearInterval(interval);
+    }
+  }, [isSwinging]);
+
+  useEffect(() => {
+    const animationFrame = requestAnimationFrame(() => drawWorld());
+    return () => cancelAnimationFrame(animationFrame);
+  }, [world, camera, handAnimation]);
 
   const generateWorld = () => {
     const blocks: Block[] = [];
-    for (let x = 0; x < WORLD_WIDTH; x++) {
-      const height = Math.floor(Math.random() * 3) + 8;
-      for (let y = 0; y < height; y++) {
-        if (y === height - 1) {
-          blocks.push({ type: 'grass', x, y, z: 0 });
-        } else if (y > height - 4) {
-          blocks.push({ type: 'dirt', x, y, z: 0 });
-        } else {
-          blocks.push({ type: 'stone', x, y, z: 0 });
+    for (let x = 0; x < WORLD_SIZE; x++) {
+      for (let z = 0; z < WORLD_SIZE; z++) {
+        const height = Math.floor(Math.random() * 3) + 4;
+        for (let y = 0; y < height; y++) {
+          if (y === height - 1) {
+            blocks.push({ type: 'grass', x, y, z });
+          } else if (y > height - 4) {
+            blocks.push({ type: 'dirt', x, y, z });
+          } else {
+            blocks.push({ type: 'stone', x, y, z });
+          }
         }
-      }
-      
-      if (Math.random() > 0.8) {
-        const treeHeight = 3;
-        for (let t = 0; t < treeHeight; t++) {
-          blocks.push({ type: 'wood', x, y: height + t, z: 0 });
+        
+        if (Math.random() > 0.85 && height >= 4) {
+          const treeHeight = 4;
+          for (let t = 0; t < treeHeight; t++) {
+            blocks.push({ type: 'wood', x, y: height + t, z });
+          }
         }
       }
     }
     setWorld(blocks);
+  };
+
+  const project3DTo2D = (x: number, y: number, z: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0, distance: 0 };
+
+    const dx = x - camera.x;
+    const dy = y - camera.y;
+    const dz = z - camera.z;
+
+    const cosPitch = Math.cos(camera.pitch);
+    const sinPitch = Math.sin(camera.pitch);
+    const cosYaw = Math.cos(camera.yaw);
+    const sinYaw = Math.sin(camera.yaw);
+
+    const rotatedX = dx * cosYaw - dz * sinYaw;
+    const rotatedZ = dx * sinYaw + dz * cosYaw;
+    const rotatedY = dy * cosPitch - rotatedZ * sinPitch;
+    const finalZ = dy * sinPitch + rotatedZ * cosPitch;
+
+    if (finalZ <= 0.1) return { x: 0, y: 0, distance: -1 };
+
+    const fov = 500;
+    const screenX = (rotatedX * fov) / finalZ + canvas.width / 2;
+    const screenY = (rotatedY * fov) / finalZ + canvas.height / 2;
+
+    return { x: screenX, y: screenY, distance: finalZ };
+  };
+
+  const drawCube = (ctx: CanvasRenderingContext2D, x: number, y: number, z: number, color: string) => {
+    const size = BLOCK_SIZE;
+    const corners = [
+      [x, y, z],
+      [x + 1, y, z],
+      [x + 1, y + 1, z],
+      [x, y + 1, z],
+      [x, y, z + 1],
+      [x + 1, y, z + 1],
+      [x + 1, y + 1, z + 1],
+      [x, y + 1, z + 1]
+    ];
+
+    const projected = corners.map(([cx, cy, cz]) => project3DTo2D(cx, cy, cz));
+
+    if (projected.some(p => p.distance < 0)) return;
+
+    const faces = [
+      [0, 1, 2, 3],
+      [4, 5, 6, 7],
+      [0, 1, 5, 4],
+      [2, 3, 7, 6],
+      [0, 3, 7, 4],
+      [1, 2, 6, 5]
+    ];
+
+    const faceColors = [
+      color,
+      adjustBrightness(color, 0.8),
+      adjustBrightness(color, 0.9),
+      adjustBrightness(color, 0.7),
+      adjustBrightness(color, 0.85),
+      adjustBrightness(color, 0.95)
+    ];
+
+    faces.forEach((face, faceIndex) => {
+      ctx.fillStyle = faceColors[faceIndex];
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 1;
+
+      ctx.beginPath();
+      ctx.moveTo(projected[face[0]].x, projected[face[0]].y);
+      for (let i = 1; i < face.length; i++) {
+        ctx.lineTo(projected[face[i]].x, projected[face[i]].y);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    });
+  };
+
+  const adjustBrightness = (color: string, factor: number) => {
+    const hex = color.replace('#', '');
+    const r = Math.floor(parseInt(hex.substring(0, 2), 16) * factor);
+    const g = Math.floor(parseInt(hex.substring(2, 4), 16) * factor);
+    const b = Math.floor(parseInt(hex.substring(4, 6), 16) * factor);
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+  };
+
+  const drawHand = (ctx: CanvasRenderingContext2D) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const handX = canvas.width * 0.7;
+    const handY = canvas.height * 0.8 + Math.sin(handAnimation) * 30;
+
+    const skinColor = '#D2B48C';
+    const blockColor = blockColors[selectedBlock];
+
+    ctx.save();
+    ctx.translate(handX, handY);
+    ctx.rotate(handAnimation * 0.3);
+
+    ctx.fillStyle = skinColor;
+    ctx.fillRect(-20, 0, 40, 80);
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(-20, 0, 40, 80);
+
+    ctx.fillStyle = blockColor;
+    ctx.fillRect(-30, -25, 35, 35);
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(-30, -25, 35, 35);
+
+    ctx.restore();
   };
 
   const drawWorld = () => {
@@ -119,61 +367,51 @@ const Index = () => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#87CEEB';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    world.forEach(block => {
-      if (block.type === 'air') return;
-      
-      const screenY = canvas.height - (block.y + 1) * BLOCK_SIZE;
-      const screenX = block.x * BLOCK_SIZE;
+    const sortedBlocks = world
+      .filter(block => {
+        const dx = block.x - camera.x;
+        const dz = block.z - camera.z;
+        return Math.sqrt(dx * dx + dz * dz) < RENDER_DISTANCE;
+      })
+      .sort((a, b) => {
+        const distA = Math.sqrt((a.x - camera.x) ** 2 + (a.z - camera.z) ** 2);
+        const distB = Math.sqrt((b.x - camera.x) ** 2 + (b.z - camera.z) ** 2);
+        return distB - distA;
+      });
 
-      ctx.fillStyle = blockColors[block.type];
-      ctx.fillRect(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE);
-      
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE);
-
-      if (block.type === 'grass') {
-        ctx.fillStyle = '#1a5f1a';
-        ctx.fillRect(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE / 4);
+    sortedBlocks.forEach(block => {
+      if (block.type !== 'air') {
+        drawCube(ctx, block.x, block.y, block.z, blockColors[block.type]);
       }
     });
+
+    drawHand(ctx);
   };
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const clickX = Math.floor((e.clientX - rect.left) / BLOCK_SIZE);
-    const clickY = Math.floor((canvas.height - (e.clientY - rect.top)) / BLOCK_SIZE);
-
-    const existingBlockIndex = world.findIndex(
-      b => b.x === clickX && b.y === clickY
-    );
+    setIsSwinging(true);
+    setHandAnimation(0);
 
     if (e.button === 0) {
-      if (existingBlockIndex === -1) {
-        const item = inventory.find(i => i.type === selectedBlock);
-        if (item && item.count > 0) {
-          setWorld([...world, { type: selectedBlock, x: clickX, y: clickY, z: 0 }]);
-          setInventory(inventory.map(i => 
-            i.type === selectedBlock ? { ...i, count: i.count - 1 } : i
-          ));
-          toast.success(`Размещен блок: ${blockLabels[selectedBlock]}`);
-        } else {
-          toast.error('Недостаточно блоков в инвентаре!');
-        }
-      }
-    } else if (e.button === 2) {
-      if (existingBlockIndex !== -1) {
-        const block = world[existingBlockIndex];
-        setWorld(world.filter((_, i) => i !== existingBlockIndex));
+      const item = inventory.find(i => i.type === selectedBlock);
+      if (item && item.count > 0) {
+        const forward = {
+          x: Math.sin(camera.yaw),
+          z: Math.cos(camera.yaw)
+        };
+        
+        const placeX = Math.round(camera.x + forward.x * 2);
+        const placeY = Math.round(camera.y);
+        const placeZ = Math.round(camera.z + forward.z * 2);
+
+        setWorld([...world, { type: selectedBlock, x: placeX, y: placeY, z: placeZ }]);
         setInventory(inventory.map(i => 
-          i.type === block.type ? { ...i, count: i.count + 1 } : i
+          i.type === selectedBlock ? { ...i, count: i.count - 1 } : i
         ));
-        toast.success(`Удален блок: ${blockLabels[block.type]}`);
+        toast.success(`Размещен блок: ${blockLabels[selectedBlock]}`);
       }
     }
   };
@@ -240,7 +478,7 @@ const Index = () => {
             </Button>
           </div>
           <p className="text-center mt-8 text-sm opacity-75">
-            ЛКМ - Поставить блок | ПКМ - Убрать блок
+            WASD - Движение | Пробел/Shift - Вверх/Вниз | Мышь - Обзор
           </p>
         </Card>
       </div>
@@ -281,18 +519,20 @@ const Index = () => {
         </div>
       )}
 
-      <div className="flex items-center justify-center min-h-screen p-4">
+      <div className="flex items-center justify-center min-h-screen">
         <canvas
           ref={canvasRef}
-          width={WORLD_WIDTH * BLOCK_SIZE}
-          height={WORLD_HEIGHT * BLOCK_SIZE}
+          width={1200}
+          height={800}
           onClick={handleCanvasClick}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            handleCanvasClick(e as any);
-          }}
-          className="border-8 border-black shadow-pixel cursor-crosshair bg-white"
+          onContextMenu={(e) => e.preventDefault()}
+          className="border-8 border-black shadow-pixel cursor-crosshair"
         />
+      </div>
+
+      <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+        <div className="w-8 h-1 bg-white"></div>
+        <div className="w-1 h-8 bg-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2"></div>
       </div>
 
       {showInventory && (
